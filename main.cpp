@@ -4,43 +4,68 @@
 #include <vector>
 #include <string>
 #include <cmath>
+#include <unordered_map>
+#include "menu_system.h"
 
 #undef main
 
-const int WINDOW_WIDTH = 800;
-const int WINDOW_HEIGHT = 400;
-const int MENU_BAR_HEIGHT = 26;
+const int WINDOW_WIDTH = 1200;
+const int WINDOW_HEIGHT = 700;
 
-struct MenuItem
+// Drawing tools
+enum DrawingTool
 {
-    std::string text;
-    int x, width;
-    bool isHovered = false;
-    float hoverAnimation = 0.0f; // 0.0 to 1.0 for animation smoothness
+    TOOL_LINE,
+    TOOL_PENCIL,
+    TOOL_PEN, // Added pen tool
+    TOOL_RECTANGLE,
+    TOOL_CIRCLE,
+    TOOL_ERASER // Added eraser tool
 };
 
-SDL_Texture *renderTextToTexture(SDL_Renderer *renderer, TTF_Font *font, const char *text, SDL_Color color)
+// Drawing state
+struct DrawingState
 {
-    SDL_Surface *surface = TTF_RenderText_Blended(font, text, color);
-    if (!surface)
-        return nullptr;
+    DrawingTool currentTool = TOOL_PENCIL;
+    SDL_Color currentColor = {0, 0, 0, 255};
+    int lineWidth = 2;
+    bool isDrawing = false;
+    int startX = 0, startY = 0;
+    int currentX = 0, currentY = 0;
+    std::vector<SDL_Point> pencilPoints;
+    std::vector<SDL_FPoint> pencilThickPoints; // For thick lines
 
-    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
-    SDL_FreeSurface(surface);
-    return texture;
-}
+    // Store all drawn shapes for persistence
+    struct DrawnShape
+    {
+        DrawingTool tool;
+        SDL_Color color;
+        int lineWidth;
+        int x1, y1, x2, y2;
+        std::vector<SDL_FPoint> points; // For pencil/pen
+    };
+    std::vector<DrawnShape> drawnShapes;
+};
 
 void renderText(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y, SDL_Color color)
 {
-    SDL_Texture *texture = renderTextToTexture(renderer, font, text, color);
-    if (!texture)
+    SDL_Surface *surface = TTF_RenderText_Blended(font, text, color);
+    if (!surface)
         return;
+
+    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
+    if (!texture)
+    {
+        SDL_FreeSurface(surface);
+        return;
+    }
 
     int w, h;
     SDL_QueryTexture(texture, NULL, NULL, &w, &h);
     SDL_Rect destRect = {x, y, w, h};
     SDL_RenderCopy(renderer, texture, NULL, &destRect);
     SDL_DestroyTexture(texture);
+    SDL_FreeSurface(surface);
 }
 
 int getTextWidth(TTF_Font *font, const std::string &text)
@@ -50,6 +75,156 @@ int getTextWidth(TTF_Font *font, const std::string &text)
     return width;
 }
 
+// Function to draw thick line
+void drawThickLine(SDL_Renderer *renderer, int x1, int y1, int x2, int y2, int thickness, SDL_Color color)
+{
+    // Set color with alpha
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+
+    // For very thin lines, use the built-in line function
+    if (thickness <= 1)
+    {
+        SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
+        return;
+    }
+
+    // For thicker lines, we'll use multiple offset lines
+    // Calculate the angle of the line
+    float angle = atan2(y2 - y1, x2 - x1);
+
+    // Calculate the offset perpendicular to the line
+    float dx = sin(angle) * (thickness / 2.0f);
+    float dy = -cos(angle) * (thickness / 2.0f);
+
+    // Draw multiple lines to create thickness
+    for (int i = -thickness / 2; i <= thickness / 2; i++)
+    {
+        float offsetX = dx * (i / (thickness / 2.0f));
+        float offsetY = dy * (i / (thickness / 2.0f));
+        SDL_RenderDrawLine(renderer,
+                           x1 + offsetX, y1 + offsetY,
+                           x2 + offsetX, y2 + offsetY);
+    }
+
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+}
+
+// Function to draw thick rectangle
+void drawThickRect(SDL_Renderer *renderer, int x1, int y1, int x2, int y2, int thickness, SDL_Color color)
+{
+    // Normalize coordinates
+    int minX = std::min(x1, x2);
+    int minY = std::min(y1, y2);
+    int maxX = std::max(x1, x2);
+    int maxY = std::max(y1, y2);
+
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+
+    for (int i = 0; i < thickness; i++)
+    {
+        SDL_Rect rect = {minX + i, minY + i, maxX - minX - 2 * i, maxY - minY - 2 * i};
+        SDL_RenderDrawRect(renderer, &rect);
+    }
+}
+
+// Function to draw thick circle
+void drawThickCircle(SDL_Renderer *renderer, int centerX, int centerY, int radius, int thickness, SDL_Color color)
+{
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+
+    // Draw multiple circles for thickness
+    for (int r = radius - thickness / 2; r <= radius + thickness / 2; r++)
+    {
+        // Midpoint circle algorithm
+        int x = r;
+        int y = 0;
+        int error = 0;
+
+        while (x >= y)
+        {
+            SDL_RenderDrawPoint(renderer, centerX + x, centerY + y);
+            SDL_RenderDrawPoint(renderer, centerX + y, centerY + x);
+            SDL_RenderDrawPoint(renderer, centerX - y, centerY + x);
+            SDL_RenderDrawPoint(renderer, centerX - x, centerY + y);
+            SDL_RenderDrawPoint(renderer, centerX - x, centerY - y);
+            SDL_RenderDrawPoint(renderer, centerX - y, centerY - x);
+            SDL_RenderDrawPoint(renderer, centerX + y, centerY - x);
+            SDL_RenderDrawPoint(renderer, centerX + x, centerY - y);
+
+            if (error <= 0)
+            {
+                y += 1;
+                error += 2 * y + 1;
+            }
+            else
+            {
+                x -= 1;
+                error -= 2 * x + 1;
+            }
+        }
+    }
+
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+}
+
+// Function to draw persistent shapes
+void drawPersistentShapes(SDL_Renderer *renderer, const std::vector<DrawingState::DrawnShape> &shapes)
+{
+    for (const auto &shape : shapes)
+    {
+        switch (shape.tool)
+        {
+        case TOOL_PENCIL:
+        case TOOL_PEN:
+            if (shape.points.size() < 2)
+                continue;
+
+            SDL_SetRenderDrawColor(renderer, shape.color.r, shape.color.g, shape.color.b, shape.color.a);
+
+            for (size_t i = 1; i < shape.points.size(); i++)
+            {
+                if (shape.lineWidth <= 1)
+                {
+                    SDL_RenderDrawLine(renderer,
+                                       shape.points[i - 1].x, shape.points[i - 1].y,
+                                       shape.points[i].x, shape.points[i].y);
+                }
+                else
+                {
+                    drawThickLine(renderer,
+                                  shape.points[i - 1].x, shape.points[i - 1].y,
+                                  shape.points[i].x, shape.points[i].y,
+                                  shape.lineWidth, shape.color);
+                }
+            }
+            break;
+
+        case TOOL_LINE:
+            drawThickLine(renderer, shape.x1, shape.y1, shape.x2, shape.y2, shape.lineWidth, shape.color);
+            break;
+
+        case TOOL_RECTANGLE:
+            drawThickRect(renderer, shape.x1, shape.y1, shape.x2, shape.y2, shape.lineWidth, shape.color);
+            break;
+
+        case TOOL_CIRCLE:
+        {
+            int dx = shape.x2 - shape.x1;
+            int dy = shape.y2 - shape.y1;
+            int radius = (int)sqrt(dx * dx + dy * dy);
+            drawThickCircle(renderer, shape.x1, shape.y1, radius, shape.lineWidth, shape.color);
+            break;
+        }
+        case TOOL_ERASER:
+            // Eraser logic would be complex, implement later
+            break;
+        }
+    }
+}
+
+// Main application
 int main()
 {
     // Initialize SDL
@@ -104,27 +279,15 @@ int main()
         }
     }
 
-    // Menu items
-    std::vector<MenuItem> menuItems = {
-        {"File", 0, 0},
-        {"Edit", 0, 0},
-        {"View", 0, 0},
-        {"Window", 0, 0},
-        {"Help", 0, 0}};
-
-    // Calculate menu item positions and widths
-    // Start right after the traffic light buttons with less padding
-    int menuX = 10; // Reduced from 20 to align with left edge
-    for (auto &item : menuItems)
-    {
-        item.x = menuX;
-        item.width = getTextWidth(regularFont, item.text) + 16; // Slightly less padding for macOS feel
-        menuX += item.width;
-    }
+    // Create menu system
+    MenuSystem menuSystem(regularFont, WINDOW_WIDTH);
 
     // App title
     std::string appTitle = "Animation Engine";
     int appTitleWidth = getTextWidth(regularFont, appTitle);
+
+    // Initialize drawing state
+    DrawingState drawingState;
 
     // Main loop
     bool running = true;
@@ -133,6 +296,14 @@ int main()
     Uint32 lastTime = SDL_GetTicks();
     int actualWindowWidth = WINDOW_WIDTH;
     int actualWindowHeight = WINDOW_HEIGHT;
+
+    // Tool bar variables
+    int toolBarHeight = 30; // Initial toolbar height
+    bool isResizingToolBar = false;
+    int resizeStartY;
+    std::vector<std::string> toolBarItems = {"Pencil", "Pen", "Rectangle", "Circle", "Eraser", "Red", "Undo"};
+    std::vector<SDL_Rect> toolBarItemRects(toolBarItems.size());
+    std::vector<bool> toolBarItemHovered(toolBarItems.size(), false);
 
     while (running)
     {
@@ -155,6 +326,7 @@ int main()
                 {
                     // Update window size for full-width menu bar
                     SDL_GetWindowSize(window, &actualWindowWidth, &actualWindowHeight);
+                    menuSystem.recalculateMenuPositions();
                 }
             }
             else if (event.type == SDL_MOUSEMOTION)
@@ -162,83 +334,285 @@ int main()
                 int mouseX = event.motion.x;
                 int mouseY = event.motion.y;
 
-                // Check for menu item hover
-                for (auto &item : menuItems)
-                {
-                    bool hovering = (mouseX >= item.x && mouseX < item.x + item.width &&
-                                     mouseY >= 0 && mouseY <= MENU_BAR_HEIGHT);
+                // Update current drawing position
+                drawingState.currentX = mouseX;
+                drawingState.currentY = mouseY;
 
-                    item.isHovered = hovering;
+                // Add point to pencil stroke if drawing
+                if (drawingState.isDrawing && (drawingState.currentTool == TOOL_PENCIL || drawingState.currentTool == TOOL_PEN))
+                {
+                    // Only add point if it's different enough from the last one (to reduce points)
+                    if (drawingState.pencilThickPoints.empty() ||
+                        std::fabs(mouseX - drawingState.pencilThickPoints.back().x) > 1 ||
+                        std::fabs(mouseY - drawingState.pencilThickPoints.back().y) > 1)
+                    {
+                        drawingState.pencilThickPoints.push_back({(float)mouseX, (float)mouseY});
+                    }
+                }
+
+                // Handle menu mouse motion
+                menuSystem.handleMouseMotion(mouseX, mouseY);
+
+                // Check for toolbar resize hover
+                if (mouseY > actualWindowHeight - toolBarHeight - 5 && mouseY < actualWindowHeight - toolBarHeight + 5)
+                {
+                    SDL_SetCursor(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS));
+                }
+                else
+                {
+                    SDL_SetCursor(SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW));
+                }
+
+                // Check for toolbar item hover
+                for (size_t i = 0; i < toolBarItems.size(); i++)
+                {
+                    toolBarItemHovered[i] = (mouseX > toolBarItemRects[i].x && mouseX < toolBarItemRects[i].x + toolBarItemRects[i].w &&
+                                             mouseY > toolBarItemRects[i].y && mouseY < toolBarItemRects[i].y + toolBarItemRects[i].h);
+                }
+            }
+            else if (event.type == SDL_MOUSEBUTTONDOWN)
+            {
+                int mouseX = event.button.x;
+                int mouseY = event.button.y;
+
+                // Check if click is in drawing area (below menu bar)
+                if (mouseY > menuSystem.getMenuBarHeight() && mouseY < actualWindowHeight - toolBarHeight)
+                {
+                    if (event.button.button == SDL_BUTTON_LEFT)
+                    {
+                        drawingState.isDrawing = true;
+                        drawingState.startX = mouseX;
+                        drawingState.startY = mouseY;
+
+                        if (drawingState.currentTool == TOOL_PENCIL || drawingState.currentTool == TOOL_PEN)
+                        {
+                            drawingState.pencilThickPoints.clear();
+                            drawingState.pencilThickPoints.push_back({(float)mouseX, (float)mouseY});
+                        }
+                    }
+                }
+                else if (mouseY > actualWindowHeight - toolBarHeight - 5 && mouseY < actualWindowHeight - toolBarHeight + 5)
+                {
+                    isResizingToolBar = true;
+                    resizeStartY = mouseY;
+                }
+                else
+                {
+                    // Handle menu click
+                    menuSystem.handleMouseClick(mouseX, mouseY);
+
+                    // Process menu actions
+                    for (const auto &item : menuSystem.getMenuItems())
+                    {
+                        if (item.text == "Tools" && item.isOpen)
+                        {
+                            for (const auto &dropdownItem : item.dropdownItems)
+                            {
+                                if (dropdownItem.isHovered)
+                                {
+                                    if (dropdownItem.text == "Pencil")
+                                        drawingState.currentTool = TOOL_PENCIL;
+                                    else if (dropdownItem.text == "Line")
+                                        drawingState.currentTool = TOOL_LINE;
+                                    else if (dropdownItem.text == "Rectangle")
+                                        drawingState.currentTool = TOOL_RECTANGLE;
+                                    else if (dropdownItem.text == "Circle")
+                                        drawingState.currentTool = TOOL_CIRCLE;
+                                    else if (dropdownItem.text == "Eraser")
+                                        drawingState.currentTool = TOOL_ERASER;
+                                }
+                            }
+                        }
+                        // Add other menu actions here (File, Edit, etc.)
+                    }
+
+                    // Check for toolbar item clicks
+                    for (size_t i = 0; i < toolBarItems.size(); i++)
+                    {
+                        if (toolBarItemHovered[i])
+                        {
+                            if (toolBarItems[i] == "Pencil")
+                                drawingState.currentTool = TOOL_PENCIL;
+                            else if (toolBarItems[i] == "Pen")
+                                drawingState.currentTool = TOOL_PEN;
+                            else if (toolBarItems[i] == "Rectangle")
+                                drawingState.currentTool = TOOL_RECTANGLE;
+                            else if (toolBarItems[i] == "Circle")
+                                drawingState.currentTool = TOOL_CIRCLE;
+                            else if (toolBarItems[i] == "Eraser")
+                                drawingState.currentTool = TOOL_ERASER;
+                            // Add red and undo logic later
+                        }
+                    }
+                }
+            }
+            else if (event.type == SDL_MOUSEBUTTONUP)
+            {
+                if (event.button.button == SDL_BUTTON_LEFT && drawingState.isDrawing)
+                {
+                    // Finalize the drawing
+                    drawingState.isDrawing = false;
+
+                    // Store the drawn shape for persistence
+                    DrawingState::DrawnShape shape;
+                    shape.tool = drawingState.currentTool;
+                    shape.color = drawingState.currentColor;
+                    shape.lineWidth = drawingState.lineWidth;
+                    shape.x1 = drawingState.startX;
+                    shape.y1 = drawingState.startY;
+                    shape.x2 = drawingState.currentX;
+                    shape.y2 = drawingState.currentY;
+
+                    if (drawingState.currentTool == TOOL_PENCIL || drawingState.currentTool == TOOL_PEN)
+                    {
+                        shape.points = drawingState.pencilThickPoints;
+                    }
+
+                    drawingState.drawnShapes.push_back(shape);
+                }
+                isResizingToolBar = false;
+            }
+            else if (event.type == SDL_KEYDOWN)
+            {
+                // Keyboard shortcuts for tools
+                switch (event.key.keysym.sym)
+                {
+                case SDLK_p:
+                    drawingState.currentTool = TOOL_PENCIL;
+                    break;
+                case SDLK_n:
+                    drawingState.currentTool = TOOL_PEN;
+                    break;
+                case SDLK_l:
+                    drawingState.currentTool = TOOL_LINE;
+                    break;
+                case SDLK_r:
+                    drawingState.currentTool = TOOL_RECTANGLE;
+                    break;
+                case SDLK_c:
+                    drawingState.currentTool = TOOL_CIRCLE;
+                    break;
+                case SDLK_e:
+                    drawingState.currentTool = TOOL_ERASER;
+                    break;
+                case SDLK_1:
+                    drawingState.lineWidth = 1;
+                    break;
+                case SDLK_2:
+                    drawingState.lineWidth = 2;
+                    break;
+                case SDLK_3:
+                    drawingState.lineWidth = 3;
+                    break;
+                case SDLK_4:
+                    drawingState.lineWidth = 4;
+                    break;
+                case SDLK_5:
+                    // Line width shortcuts (1-5)
+                    drawingState.lineWidth = event.key.keysym.sym - SDLK_0;
+                    break;
                 }
             }
         }
 
-        // Update animations - macOS style (faster appear, slightly slower disappear)
-        for (auto &item : menuItems)
-        {
-            if (item.isHovered)
-            {
-                // macOS animations appear quickly
-                item.hoverAnimation = std::min(1.0f, item.hoverAnimation + deltaTime * 8.0f);
-            }
-            else
-            {
-                // but fade out more smoothly
-                item.hoverAnimation = std::max(0.0f, item.hoverAnimation - deltaTime * 3.0f);
-            }
-        }
+        // Update menu animations
+        menuSystem.update(deltaTime);
 
-        // Clear screen
-        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+        // Clear screen with canvas color (slightly off-white for drawing area)
+        SDL_SetRenderDrawColor(renderer, 250, 250, 250, 255);
         SDL_RenderClear(renderer);
 
-        // Draw menu bar background with subtle gradient (full width)
-        SDL_SetRenderDrawColor(renderer, 236, 236, 236, 255);
-        SDL_Rect menuBarTop = {0, 0, actualWindowWidth, MENU_BAR_HEIGHT / 2};
-        SDL_RenderFillRect(renderer, &menuBarTop);
+        // Draw menu bar and dropdowns
+        menuSystem.render(renderer, actualWindowWidth);
 
-        SDL_SetRenderDrawColor(renderer, 230, 230, 230, 255);
-        SDL_Rect menuBarBottom = {0, MENU_BAR_HEIGHT / 2, actualWindowWidth, MENU_BAR_HEIGHT / 2};
-        SDL_RenderFillRect(renderer, &menuBarBottom);
+        // Draw persistent shapes
+        drawPersistentShapes(renderer, drawingState.drawnShapes);
 
-        // Draw menu bar bottom border (full width)
-        SDL_SetRenderDrawColor(renderer, 210, 210, 210, 255);
-        SDL_Rect menuBarBorder = {0, MENU_BAR_HEIGHT - 1, actualWindowWidth, 1};
-        SDL_RenderFillRect(renderer, &menuBarBorder);
-
-        // Draw menu items
-        for (const auto &item : menuItems)
+        // Draw current shape if drawing
+        if (drawingState.isDrawing)
         {
-            // More faithful macOS hover effect
-            if (item.hoverAnimation > 0.01f)
+            switch (drawingState.currentTool)
             {
-                // macOS uses a light blue highlight
-                SDL_SetRenderDrawColor(renderer, 0, 120, 215, (Uint8)(item.hoverAnimation * 40));
-                SDL_Rect hoverRect = {item.x, 2, item.width, MENU_BAR_HEIGHT - 4};
-                SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+            case TOOL_PENCIL:
+            case TOOL_PEN:
+                // Draw the current pencil line
+                if (drawingState.pencilThickPoints.size() >= 2)
+                {
+                    for (size_t i = 1; i < drawingState.pencilThickPoints.size(); i++)
+                    {
+                        drawThickLine(renderer,
+                                      drawingState.pencilThickPoints[i - 1].x, drawingState.pencilThickPoints[i - 1].y,
+                                      drawingState.pencilThickPoints[i].x, drawingState.pencilThickPoints[i].y,
+                                      drawingState.lineWidth, drawingState.currentColor);
+                    }
+                }
+                break;
 
-                // macOS has rounded rectangles for menu highlights
-                // Using pill shape as approximation
-                SDL_RenderFillRect(renderer, &hoverRect);
-                SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+            case TOOL_LINE:
+                drawThickLine(renderer,
+                              drawingState.startX, drawingState.startY,
+                              drawingState.currentX, drawingState.currentY,
+                              drawingState.lineWidth, drawingState.currentColor);
+                break;
+
+            case TOOL_RECTANGLE:
+                drawThickRect(renderer,
+                              drawingState.startX, drawingState.startY,
+                              drawingState.currentX, drawingState.currentY,
+                              drawingState.lineWidth, drawingState.currentColor);
+                break;
+
+            case TOOL_CIRCLE:
+            {
+                int dx = drawingState.currentX - drawingState.startX;
+                int dy = drawingState.currentY - drawingState.startY;
+                int radius = (int)sqrt(dx * dx + dy * dy);
+                drawThickCircle(renderer,
+                                drawingState.startX, drawingState.startY,
+                                radius, drawingState.lineWidth, drawingState.currentColor);
+                break;
             }
+            case TOOL_ERASER:
 
-            // Calculate text color (gets slightly brighter on hover - macOS behavior)
-            Uint8 textBrightness = (Uint8)(40 + item.hoverAnimation * 20);
-            SDL_Color textColor = {textBrightness, textBrightness, textBrightness, 255};
-
-            // Draw text
-            renderText(renderer, regularFont, item.text.c_str(),
-                       item.x + (item.width - getTextWidth(regularFont, item.text)) / 2,
-                       (MENU_BAR_HEIGHT - TTF_FontHeight(regularFont)) / 2,
-                       textColor);
+                break;
+            }
         }
 
-        // Draw app title in center (precisely centered regardless of window size)
+        // Draw app title in center
         int titleX = (actualWindowWidth - appTitleWidth) / 2;
         renderText(renderer, regularFont, appTitle.c_str(), titleX,
-                   (MENU_BAR_HEIGHT - TTF_FontHeight(regularFont)) / 2,
+                   (menuSystem.getMenuBarHeight() - TTF_FontHeight(regularFont)) / 2,
                    {100, 100, 100, 255});
+
+        // Draw tool bar
+        SDL_SetRenderDrawColor(renderer, 240, 240, 240, 255);
+        SDL_Rect toolBarRect = {0, actualWindowHeight - toolBarHeight, actualWindowWidth, toolBarHeight};
+        SDL_RenderFillRect(renderer, &toolBarRect);
+
+        SDL_SetRenderDrawColor(renderer, 220, 220, 220, 255);
+        SDL_Rect toolBarTopBorder = {0, actualWindowHeight - toolBarHeight - 1, actualWindowWidth, 1};
+        SDL_RenderFillRect(renderer, &toolBarTopBorder);
+
+        // Draw toolbar items
+        int itemX = 10;
+        for (size_t i = 0; i < toolBarItems.size(); i++)
+        {
+            SDL_Color textColor = toolBarItemHovered[i] ? SDL_Color{50, 50, 50, 255} : SDL_Color{80, 80, 80, 255};
+            renderText(renderer, regularFont, toolBarItems[i].c_str(), itemX, actualWindowHeight - toolBarHeight + (toolBarHeight - TTF_FontHeight(regularFont)) / 2, textColor);
+            toolBarItemRects[i] = {itemX, actualWindowHeight - toolBarHeight, getTextWidth(regularFont, toolBarItems[i]), TTF_FontHeight(regularFont)};
+            itemX += toolBarItemRects[i].w + 20;
+        }
+
+        // Handle toolbar resize
+        if (isResizingToolBar)
+        {
+            toolBarHeight += resizeStartY - event.motion.y;
+            if (toolBarHeight < 20)
+                toolBarHeight = 20;
+            if (toolBarHeight > actualWindowHeight - menuSystem.getMenuBarHeight() - 20)
+                toolBarHeight = actualWindowHeight - menuSystem.getMenuBarHeight() - 20;
+            resizeStartY = event.motion.y;
+        }
 
         // Present the rendered frame
         SDL_RenderPresent(renderer);
