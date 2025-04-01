@@ -4,6 +4,7 @@
 #include "resource_manager.h"
 #include "toolbar.h"
 #include "menu_system.h"
+#include "panel.h"
 #include <string>
 
 class Application
@@ -13,6 +14,7 @@ private:
     ResourceManager resourceManager;
     MenuSystem menuSystem;
     Toolbar toolbar;
+    Panel panel;
 
     bool running;
     std::string appTitle;

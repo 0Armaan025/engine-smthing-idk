@@ -9,7 +9,8 @@ Application::Application()
       toolbar({"Pencil", "Pen", "Rectangle", "Circle", "Eraser", "Redo", "Undo"}, 30),
       running(false),
       appTitle("Animation Engine"),
-      lastTime(0)
+      lastTime(0),
+      panel(1200, 700, 300)
 {
 }
 
@@ -167,6 +168,9 @@ void Application::render()
     // Draw app title in center
     TTF_Font *regularFont = resourceManager.getFont("regular");
 
+    // testing adding the Panel
+
+    panel.render(renderer);
     // TESTING: drawing hi there or we can just make canvas.h
 
     if (regularFont)

@@ -1,34 +1,35 @@
-#pragma once
+#ifndef MENU_SYSTEM_H
+#define MENU_SYSTEM_H
 
-#include "SDL2/SDL.h"
-#include "SDL2/SDL_ttf.h"
-#include <vector>
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
 #include <string>
+#include <vector>
 
-// Menu item structure
+struct DropdownItem
+{
+    std::string text;
+    SDL_Rect rect;
+    bool isHovered = false;
+    float hoverAmount = 0.0f; // Added for animation (0.0 to 1.0)
+};
+
 struct MenuItem
 {
     std::string text;
     SDL_Rect rect;
     bool isHovered = false;
     bool isOpen = false;
-    std::vector<MenuItem> dropdownItems;
+    float hoverAmount = 0.0f; // Added for animation (0.0 to 1.0)
+    std::vector<DropdownItem> dropdownItems;
 };
 
 class MenuSystem
 {
-private:
-    TTF_Font *font;
-    std::vector<MenuItem> menuItems;
-    int menuBarHeight = 30;
-    int dropdownWidth = 150;
-
-    void renderText(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y, SDL_Color color);
-
 public:
-    MenuSystem(TTF_Font *f, int windowWidth);
+    MenuSystem(TTF_Font *font, int windowWidth);
+    ~MenuSystem(); // Added destructor to clean up cursor resources
 
-    void recalculateMenuPositions();
     void handleMouseMotion(int mouseX, int mouseY);
     void handleMouseClick(int mouseX, int mouseY);
     void update(float deltaTime);
@@ -36,4 +37,17 @@ public:
 
     int getMenuBarHeight() const;
     const std::vector<MenuItem> &getMenuItems() const;
+    void recalculateMenuPositions();
+
+private:
+    static const int menuBarHeight = 30;
+    static const int dropdownWidth = 150;
+
+    TTF_Font *font;
+    std::vector<MenuItem> menuItems;
+    SDL_Cursor *currentCursor = nullptr; // Added to store current cursor
+
+    void renderText(SDL_Renderer *renderer, TTF_Font *font, const char *text, int x, int y, SDL_Color color);
 };
+
+#endif
