@@ -6,7 +6,7 @@ Application::Application()
     : windowManager("Animation Engine", 1200, 700),
       resourceManager(nullptr),
       menuSystem(nullptr, 1200), // This will be updated after initialization
-      toolbar({"Pencil", "Pen", "Rectangle", "Circle", "Eraser", "Redo", "Trying", "Undo"}, 30),
+      toolbar({"Pencil", "Pen", "Rectangle", "Circle", "Eraser", "Redo", "Undo"}, 30),
       running(false),
       appTitle("Animation Engine"),
       lastTime(0)
@@ -37,11 +37,10 @@ bool Application::initialize()
         return false;
     }
 
-    // Load fonts
-    TTF_Font *regularFont = resourceManager.loadFont("regular", "OpenSans.ttf", 14);
+    TTF_Font *regularFont = resourceManager.loadFont("regular", "OpenSans.ttf", 16);
     if (!regularFont)
     {
-        // Try system font as fallback
+
         regularFont = resourceManager.loadFont("regular", "Arial.ttf", 14);
         if (!regularFont)
         {
@@ -50,7 +49,6 @@ bool Application::initialize()
         }
     }
 
-    // Initialize menu system with font
     menuSystem = MenuSystem(regularFont, windowManager.getWidth());
 
     running = true;
@@ -168,8 +166,38 @@ void Application::render()
 
     // Draw app title in center
     TTF_Font *regularFont = resourceManager.getFont("regular");
+
+    // TESTING: drawing hi there or we can just make canvas.h
+
     if (regularFont)
     {
+
+        std::string text = "Hi there, I'm Armaan!";
+
+        int textWidth, textHeight;
+        TTF_SizeText(regularFont, text.c_str(), &textWidth, &textHeight);
+
+        int textX = (windowManager.getWidth() - textWidth) / 2;
+        int textY = menuSystem.getMenuBarHeight() + (windowManager.getHeight() - menuSystem.getMenuBarHeight() - toolbar.getHeight()) / 2 - (textHeight / 2);
+
+        std::string textKey = "greeting_text";
+        SDL_Texture *textTexture = resourceManager.getCachedTexture(textKey);
+        if (!textTexture)
+        {
+            resourceManager.cacheTextTexture(textKey, regularFont, text, {0, 0, 0, 255});
+            textTexture = resourceManager.getCachedTexture(textKey);
+        }
+
+        if (textTexture)
+        {
+            SDL_Rect textRect = {
+                textX,
+                textY,
+                textWidth,
+                textHeight};
+            SDL_RenderCopy(renderer, textTexture, NULL, &textRect);
+        }
+
         int appTitleWidth, appTitleHeight;
         TTF_SizeText(regularFont, appTitle.c_str(), &appTitleWidth, &appTitleHeight);
 
@@ -177,6 +205,7 @@ void Application::render()
 
         // Check if we have a cached texture, otherwise create one
         std::string titleKey = "app_title";
+
         SDL_Texture *titleTexture = resourceManager.getCachedTexture(titleKey);
         if (!titleTexture)
         {
@@ -225,5 +254,9 @@ void Application::run()
 
 void Application::cleanup()
 {
-    // Cleanup is handled by destructors
+}
+
+Application::~Application()
+{
+    cleanup();
 }

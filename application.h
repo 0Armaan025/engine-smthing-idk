@@ -30,7 +30,7 @@ private:
 
 public:
     Application();
-
+    ~Application();
     bool initialize();
     void run();
     void cleanup();

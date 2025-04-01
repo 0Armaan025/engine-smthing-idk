@@ -17,6 +17,10 @@ private:
     int minHeight;
     int maxHeight;
 
+private:
+    SDL_Cursor *arrowCursor;
+    SDL_Cursor *handCursor;
+
 public:
     Toolbar(const std::vector<std::string> &items, int height);
 

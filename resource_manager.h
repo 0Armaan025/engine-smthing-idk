@@ -13,7 +13,7 @@ private:
     std::unordered_map<std::string, SDL_Texture *> textures;
     SDL_Renderer *renderer;
 
-    // System cursors
+    
     SDL_Cursor *arrowCursor;
     SDL_Cursor *resizeCursor;
 
