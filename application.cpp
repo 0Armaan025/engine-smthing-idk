@@ -50,6 +50,8 @@ bool Application::initialize()
         }
     }
 
+    panel.setFont(resourceManager.getFont("regular"));
+
     menuSystem = MenuSystem(regularFont, windowManager.getWidth());
 
     running = true;
@@ -66,6 +68,9 @@ void Application::handleEvents()
 
     while (SDL_PollEvent(&event))
     {
+
+        panel.handleEvent(event);
+
         if (event.type == SDL_QUIT)
         {
             running = false;
@@ -169,7 +174,7 @@ void Application::render()
     TTF_Font *regularFont = resourceManager.getFont("regular");
 
     // testing adding the Panel
-
+    
     panel.render(renderer);
     // TESTING: drawing hi there or we can just make canvas.h
 
