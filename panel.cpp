@@ -6,31 +6,15 @@
 #include <algorithm>
 using namespace std;
 
-// Timeline frame with additional animation properties
-struct TimelineFrame
-{
-    int row;       // Timeline row (layer)
-    int col;       // Timeline column (frame number)
-    string name;   // Frame identifier
-    bool keyframe; // Whether this is a keyframe
-    int duration;  // Frame duration in frames
-    bool selected; // Whether this frame is currently selected
-};
-
 Panel::Panel(int screenWidth, int screenHeight, int panelWidth)
     : screenWidth(screenWidth), screenHeight(screenHeight),
       panelWidth(panelWidth), scrollOffsetY(0), scrollOffsetX(0), panelHeight(screenHeight),
-      font(nullptr), currentFrame(0), playing(false), playbackSpeed(1.0f)
+      font(nullptr), currentFrame(0), playing(false), playbackSpeed(1.0f), resizing(false)
 {
-    // Initialize with some default layers and frames
+    // Initialize with some default layers
     layers = {"Layer 1", "Layer 2", "Layer 3"};
     activeLayerIndex = 0;
-
-    // Add some initial frames
-    addFrame(0, 0, true); // Keyframe on Layer 1, Frame 1
-    addFrame(0, 3, true); // Keyframe on Layer 1, Frame 4
-    addFrame(1, 0, true); // Keyframe on Layer 2, Frame 1
-    addFrame(2, 5, true); // Keyframe on Layer 3, Frame 6
+    columns = {"Frame 1", "Frame 2"}; // Initial columns
 }
 
 Panel::~Panel()
@@ -72,87 +56,15 @@ void Panel::renderText(SDL_Renderer *renderer, int xPos, int yPos, const std::st
     SDL_DestroyTexture(textTexture);
 }
 
-void Panel::renderKeyframe(SDL_Renderer *renderer, int xPos, int yPos, bool isSelected, bool isKeyframe, int duration)
+void Panel::renderLayerControl(SDL_Renderer *renderer, int xPos, int yPos, int col, bool isActive)
 {
     if (renderer == nullptr)
     {
         return;
     }
 
-    int frameWidth = 15;
-    int frameHeight = 25;
-
-    SDL_Rect frameRect = {xPos, yPos, frameWidth * max(1, duration), frameHeight};
-
-    // Frame background color
-    if (isSelected)
-    {
-        // Selected frame - light blue
-        SDL_SetRenderDrawColor(renderer, 120, 180, 230, 255);
-    }
-    else
-    {
-        // Normal frame - light gray
-        SDL_SetRenderDrawColor(renderer, 230, 230, 230, 255);
-    }
-    SDL_RenderFillRect(renderer, &frameRect);
-
-    // Frame border
-    SDL_SetRenderDrawColor(renderer, 180, 180, 180, 255);
-    SDL_RenderDrawRect(renderer, &frameRect);
-
-    // Draw keyframe diamond if this is a keyframe
-    if (isKeyframe)
-    {
-        // Draw diamond shape for keyframe
-        int centerX = xPos + frameWidth / 2;
-        int centerY = yPos + frameHeight / 2;
-        int diamondSize = 6;
-
-        SDL_Point diamond[5] = {
-            {centerX, centerY - diamondSize}, // Top
-            {centerX + diamondSize, centerY}, // Right
-            {centerX, centerY + diamondSize}, // Bottom
-            {centerX - diamondSize, centerY}, // Left
-            {centerX, centerY - diamondSize}  // Back to top to close the shape
-        };
-
-        // Fill diamond
-        if (isSelected)
-        {
-            SDL_SetRenderDrawColor(renderer, 50, 120, 180, 255);
-        }
-        else
-        {
-            SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255);
-        }
-
-        for (int y = centerY - diamondSize; y <= centerY + diamondSize; y++)
-        {
-            int width = diamondSize - abs(y - centerY);
-            SDL_RenderDrawLine(renderer, centerX - width, y, centerX + width, y);
-        }
-    }
-
-    // Draw duration indicators if duration > 1
-    if (duration > 1)
-    {
-        for (int i = 1; i < duration; i++)
-        {
-            SDL_RenderDrawLine(renderer, xPos + i * frameWidth, yPos, xPos + i * frameWidth, yPos + frameHeight);
-        }
-    }
-}
-
-void Panel::renderLayerControl(SDL_Renderer *renderer, int xPos, int yPos, int row, bool isActive)
-{
-    if (renderer == nullptr)
-    {
-        return;
-    }
-
-    int layerHeight = 25;
-    int layerWidth = 120;
+    int layerHeight = 25; // Changed to 25 for vertical
+    int layerWidth = 120; // chnaged to 120
 
     SDL_Rect layerRect = {xPos, yPos, layerWidth, layerHeight};
 
@@ -173,16 +85,16 @@ void Panel::renderLayerControl(SDL_Renderer *renderer, int xPos, int yPos, int r
     SDL_SetRenderDrawColor(renderer, 160, 160, 160, 255);
     SDL_RenderDrawRect(renderer, &layerRect);
 
-    // Layer name text
+    // Layer name text.  y pos changed.
     SDL_Color textColor = {50, 50, 50, 255};
-    renderText(renderer, xPos + 10, yPos + 5, layers[row], textColor);
+    renderText(renderer, xPos + 5, yPos + 5, layers[col], textColor);
 
-    // Visibility and lock icons
+    // Visibility and lock icons. xpos changed.
     int iconSize = 15;
-    int iconY = yPos + 5;
+    int iconX = xPos + 90;
 
-    // Visibility icon (eye)
-    SDL_Rect eyeRect = {xPos + layerWidth - iconSize * 2 - 5, iconY, iconSize, iconSize};
+    // Visibility icon (eye). y pos changed.
+    SDL_Rect eyeRect = {iconX, yPos + 5, iconSize, iconSize};
     SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255);
     SDL_RenderDrawRect(renderer, &eyeRect);
 
@@ -193,10 +105,14 @@ void Panel::renderLayerControl(SDL_Renderer *renderer, int xPos, int yPos, int r
     int eyeHeight = 5;
 
     // Eye outline
-    SDL_RenderDrawLine(renderer, eyeCenterX - eyeWidth / 2, eyeCenterY, eyeCenterX + eyeWidth / 2, eyeCenterY);
-    SDL_RenderDrawLine(renderer, eyeCenterX - eyeWidth / 2, eyeCenterY, eyeCenterX - eyeWidth / 2 + 2, eyeCenterY - eyeHeight / 2);
-    SDL_RenderDrawLine(renderer, eyeCenterX + eyeWidth / 2, eyeCenterY, eyeCenterX + eyeWidth / 2 - 2, eyeCenterY - eyeHeight / 2);
-    SDL_RenderDrawLine(renderer, eyeCenterX - eyeWidth / 2 + 2, eyeCenterY - eyeHeight / 2, eyeCenterX + eyeWidth / 2 - 2, eyeCenterY - eyeHeight / 2);
+    SDL_RenderDrawLine(renderer, eyeCenterX - eyeWidth / 2, eyeCenterY,
+                       eyeCenterX + eyeWidth / 2, eyeCenterY);
+    SDL_RenderDrawLine(renderer, eyeCenterX - eyeWidth / 2, eyeCenterY,
+                       eyeCenterX - eyeWidth / 2 + 2, eyeCenterY - eyeHeight / 2);
+    SDL_RenderDrawLine(renderer, eyeCenterX + eyeWidth / 2, eyeCenterY,
+                       eyeCenterX + eyeWidth / 2 - 2, eyeCenterY - eyeHeight / 2);
+    SDL_RenderDrawLine(renderer, eyeCenterX - eyeWidth / 2 + 2, eyeCenterY - eyeHeight / 2,
+                       eyeCenterX + eyeWidth / 2 - 2, eyeCenterY - eyeHeight / 2);
 
     // Pupil
     SDL_RenderDrawPoint(renderer, eyeCenterX, eyeCenterY);
@@ -205,8 +121,8 @@ void Panel::renderLayerControl(SDL_Renderer *renderer, int xPos, int yPos, int r
     SDL_RenderDrawPoint(renderer, eyeCenterX, eyeCenterY + 1);
     SDL_RenderDrawPoint(renderer, eyeCenterX - 1, eyeCenterY);
 
-    // Lock icon
-    SDL_Rect lockRect = {xPos + layerWidth - iconSize - 2, iconY, iconSize, iconSize};
+    // Lock icon. y pos changed.
+    SDL_Rect lockRect = {iconX + iconSize + 2, yPos + 5, iconSize, iconSize};
     SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255);
     SDL_RenderDrawRect(renderer, &lockRect);
 
@@ -219,69 +135,79 @@ void Panel::renderLayerControl(SDL_Renderer *renderer, int xPos, int yPos, int r
     SDL_RenderDrawRect(renderer, &lockBody);
 
     // Lock arc
-    SDL_RenderDrawLine(renderer, lockCenterX - 3, lockCenterY - 1, lockCenterX - 3, lockCenterY - 3);
-    SDL_RenderDrawLine(renderer, lockCenterX + 3, lockCenterY - 1, lockCenterX + 3, lockCenterY - 3);
-    SDL_RenderDrawLine(renderer, lockCenterX - 3, lockCenterY - 3, lockCenterX + 3, lockCenterY - 3);
+    SDL_RenderDrawLine(renderer, lockCenterX - 3, lockCenterY - 1,
+                       lockCenterX - 3, lockCenterY - 3);
+    SDL_RenderDrawLine(renderer, lockCenterX + 3, lockCenterY - 1,
+                       lockCenterX + 3, lockCenterY - 3);
+    SDL_RenderDrawLine(renderer, lockCenterX - 3, lockCenterY - 3,
+                       lockCenterX + 3, lockCenterY - 3);
 }
 
-void Panel::renderTimeline(SDL_Renderer *renderer, int xPos, int yPos, int width)
+void Panel::renderTimeline(SDL_Renderer *renderer, int xPos, int yPos, int height)
 {
     if (renderer == nullptr)
     {
         return;
     }
 
-    int headerHeight = 25;
-    int frameWidth = 15;
+    int headerWidth = 120; // Changed to 120
+    int frameHeight = 25;  // Changed to 25
 
     // Render timeline header with frame numbers
-    SDL_Rect headerRect = {xPos, yPos, width, headerHeight};
+    SDL_Rect headerRect = {xPos, yPos, headerWidth, height};
     SDL_SetRenderDrawColor(renderer, 180, 180, 180, 255);
     SDL_RenderFillRect(renderer, &headerRect);
 
-    // Draw vertical lines for frame divisions
-    int numFrames = width / frameWidth;
+    // draw the columns.
+    for (size_t i = 0; i < columns.size(); i++)
+    {
+        int columnX = xPos + i * headerWidth;
+        SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
+        SDL_RenderDrawLine(renderer, columnX, yPos, columnX, yPos + height);
+        SDL_Color textColor = {50, 50, 50, 255};
+        renderText(renderer, columnX + 5, yPos + 5, columns[i], textColor);
+    }
+    // Draw horizontal lines for frame divisions
+    int numFrames = height / frameHeight;
     for (int i = 0; i <= numFrames; i++)
     {
-        int lineX = xPos + i * frameWidth;
+        int lineY = yPos + i * frameHeight;
 
         // Every 5th line is darker and taller
         if (i % 5 == 0)
         {
             SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255);
-            SDL_RenderDrawLine(renderer, lineX, yPos, lineX, yPos + headerHeight);
-
+            SDL_RenderDrawLine(renderer, xPos, lineY, xPos + panelWidth, lineY); // changed
             // Draw frame number
             SDL_Color textColor = {50, 50, 50, 255};
-            renderText(renderer, lineX + 2, yPos + 2, to_string(i + 1), textColor);
+            renderText(renderer, xPos + 2, lineY + 2, to_string(i + 1), textColor);
         }
         else
         {
             SDL_SetRenderDrawColor(renderer, 130, 130, 130, 255);
-            SDL_RenderDrawLine(renderer, lineX, yPos + headerHeight / 2, lineX, yPos + headerHeight);
+            SDL_RenderDrawLine(renderer, xPos, lineY, xPos + panelWidth, lineY); // changed.
         }
     }
 
     // Draw playhead position
-    int playheadX = xPos + currentFrame * frameWidth;
+    int playheadY = yPos + currentFrame * frameHeight;
     SDL_SetRenderDrawColor(renderer, 220, 60, 60, 255);
 
-    // Playhead triangle
+    // Playhead triangle. x pos changed.
     SDL_Point playheadTriangle[3] = {
-        {playheadX, yPos},         // Top point
-        {playheadX - 5, yPos + 8}, // Bottom left
-        {playheadX + 5, yPos + 8}  // Bottom right
+        {xPos, playheadY},         // Left point
+        {xPos + 8, playheadY - 4}, // Top right
+        {xPos + 8, playheadY + 4}  // Bottom right
     };
 
-    for (int y = playheadTriangle[0].y; y <= playheadTriangle[1].y; y++)
+    for (int x = playheadTriangle[0].x; x <= playheadTriangle[1].x; x++)
     {
-        float progress = (float)(y - playheadTriangle[0].y) / (playheadTriangle[1].y - playheadTriangle[0].y);
-        int width = progress * 10;
-        SDL_RenderDrawLine(renderer, playheadX - width / 2, y, playheadX + width / 2, y);
+        float progress = (float)(x - playheadTriangle[0].x) / (playheadTriangle[1].x - playheadTriangle[0].x);
+        int height = progress * 8;
+        SDL_RenderDrawLine(renderer, x, playheadY - height, x, playheadY + height);
     }
-
     // Playhead line
-    SDL_RenderDrawLine(renderer, playheadX, yPos + 8, playheadX, yPos + headerHeight + layers.size() * headerHeight);
+    SDL_RenderDrawLine(renderer, xPos, playheadY, xPos + panelWidth, playheadY); // changed
 }
 
 void Panel::renderPlaybackControls(SDL_Renderer *renderer, int xPos, int yPos, int width)
@@ -406,59 +332,6 @@ bool Panel::isInsideRect(int mouseX, int mouseY, const SDL_Rect &rect)
             mouseY >= rect.y && mouseY <= rect.y + rect.h);
 }
 
-void Panel::addFrame(int row, int col, bool isKeyframe)
-{
-    // Check if there's already a frame at this position
-    for (auto &frame : frames)
-    {
-        if (frame.row == row && frame.col == col)
-        {
-            // Update existing frame
-            frame.keyframe = isKeyframe;
-            return;
-        }
-    }
-
-    // Add new frame
-    string frameName = "f" + to_string(frames.size() + 1);
-    TimelineFrame newFrame = {row, col, frameName, isKeyframe, 1, false};
-    // frames.push_back(newFrame);
-}
-
-void Panel::toggleKeyframe(int row, int col)
-{
-    for (auto &frame : frames)
-    {
-        if (frame.row == row && frame.col == col)
-        {
-            frame.keyframe = !frame.keyframe;
-            return;
-        }
-    }
-
-    // If no frame exists, create a new keyframe
-    addFrame(row, col, true);
-}
-
-void Panel::selectFrame(int row, int col)
-{
-    // Deselect all frames first
-    for (auto &frame : frames)
-    {
-        frame.selected = false;
-    }
-
-    // Select the specified frame if it exists
-    for (auto &frame : frames)
-    {
-        if (frame.row == row && frame.col == col)
-        {
-            frame.selected = true;
-            return;
-        }
-    }
-}
-
 void Panel::addLayer()
 {
     string newLayerName = "Layer " + to_string(layers.size() + 1);
@@ -483,19 +356,7 @@ void Panel::updatePlayback(float deltaTime)
         {
             currentFrame++;
             playbackTimer = 0;
-
-            // Find max frame for looping
-            int maxFrame = 0;
-            for (const auto &frame : frames)
-            {
-                maxFrame = max(maxFrame, frame.col + frame.duration);
-            }
-
-            // Loop back to start if we've reached the end
-            if (currentFrame >= maxFrame)
-            {
-                currentFrame = 0;
-            }
+            // No Frame calculation required.
         }
     }
 }
@@ -514,107 +375,53 @@ void Panel::render(SDL_Renderer *renderer)
 
     // Set common dimensions
     int layerHeaderWidth = 120;
-    int frameWidth = 15;
     int rowHeight = 25;
     int timelineStartY = 40;
-    int timelineFramesStartX = screenWidth - panelWidth + layerHeaderWidth;
-    int timelineWidth = panelWidth - layerHeaderWidth;
 
     // Render timeline header with frame numbers
-    renderTimeline(renderer, timelineFramesStartX, timelineStartY, timelineWidth);
+    renderTimeline(renderer, screenWidth - panelWidth, timelineStartY, panelHeight - 30);
 
     // Set clipping rectangle for layer area
-    SDL_Rect layerClipRect = {screenWidth - panelWidth, timelineStartY + rowHeight,
-                              layerHeaderWidth, panelHeight - timelineStartY - rowHeight - 30};
+    SDL_Rect layerClipRect = {screenWidth - panelWidth, timelineStartY,
+                              layerHeaderWidth, panelHeight - timelineStartY - 30};
     SDL_RenderSetClipRect(renderer, &layerClipRect);
 
-    // Render layer controls
+    // Render layer controls vertically
     for (size_t i = 0; i < layers.size(); i++)
     {
-        int layerY = timelineStartY + rowHeight + i * rowHeight - scrollOffsetY;
+        int layerY = timelineStartY + i * rowHeight - scrollOffsetY;
         renderLayerControl(renderer, screenWidth - panelWidth, layerY, i, i == activeLayerIndex);
-    }
-
-    // Reset clip rectangle for frames area
-    SDL_Rect framesClipRect = {timelineFramesStartX, timelineStartY + rowHeight,
-                               timelineWidth, panelHeight - timelineStartY - rowHeight - 30};
-    SDL_RenderSetClipRect(renderer, &framesClipRect);
-
-    // Render frame grid and keyframes
-    int numVisibleCols = timelineWidth / frameWidth;
-
-    // Draw vertical grid lines for all visible columns
-    for (int col = 0; col <= numVisibleCols; col++)
-    {
-        int lineX = timelineFramesStartX + col * frameWidth - scrollOffsetX;
-
-        // Skip if outside visible area
-        if (lineX < timelineFramesStartX || lineX > timelineFramesStartX + timelineWidth)
-        {
-            continue;
-        }
-
-        // Every 5th line is darker
-        if ((col + scrollOffsetX / frameWidth) % 5 == 0)
-        {
-            SDL_SetRenderDrawColor(renderer, 180, 180, 180, 255);
-        }
-        else
-        {
-            SDL_SetRenderDrawColor(renderer, 220, 220, 220, 255);
-        }
-
-        SDL_RenderDrawLine(renderer, lineX, timelineStartY + rowHeight,
-                           lineX, timelineStartY + rowHeight + layers.size() * rowHeight);
-    }
-
-    // Draw horizontal grid lines for all layers
-    for (size_t i = 0; i <= layers.size(); i++)
-    {
-        int lineY = timelineStartY + rowHeight + i * rowHeight - scrollOffsetY;
-
-        // Skip if outside visible area
-        if (lineY < timelineStartY + rowHeight || lineY > panelHeight - 30)
-        {
-            continue;
-        }
-
-        SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
-        SDL_RenderDrawLine(renderer, timelineFramesStartX, lineY,
-                           screenWidth, lineY);
-    }
-
-    // Render all frames
-    for (const auto &frame : frames)
-    {
-        int frameX = timelineFramesStartX + frame.col * frameWidth - scrollOffsetX;
-        int frameY = timelineStartY + rowHeight + frame.row * rowHeight - scrollOffsetY;
-
-        // Skip if outside visible area
-        if (frameX + frameWidth * frame.duration < timelineFramesStartX ||
-            frameX > timelineFramesStartX + timelineWidth ||
-            frameY + rowHeight < timelineStartY + rowHeight ||
-            frameY > panelHeight - 30)
-        {
-            continue;
-        }
-
-        renderKeyframe(renderer, frameX, frameY, frame.selected, frame.keyframe, frame.duration);
     }
 
     // Reset clip rectangle and render playback controls at bottom
     SDL_RenderSetClipRect(renderer, NULL);
     renderPlaybackControls(renderer, screenWidth - panelWidth, panelHeight - 30, panelWidth);
+    // Render the resize handle
+    int resizeHandleWidth = 10;
+    int resizeHandleX = screenWidth - panelWidth - resizeHandleWidth;
+    int resizeHandleY = 0;
+    int resizeHandleHeight = screenHeight;
+
+    SDL_Rect resizeHandleRect = {resizeHandleX, resizeHandleY, resizeHandleWidth, resizeHandleHeight};
+    SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255); // Darker color for handle
+    SDL_RenderFillRect(renderer, &resizeHandleRect);
+
+    // Draw a few lines on the handle to make it more visible
+    SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
+    for (int i = 0; i < 3; ++i)
+    {
+        SDL_RenderDrawLine(renderer, resizeHandleX + 2 + i * 2, resizeHandleY + resizeHandleHeight / 4,
+                           resizeHandleX + 2 + i * 2, resizeHandleY + 3 * resizeHandleHeight / 4);
+    }
 }
 
 void Panel::handleEvent(SDL_Event &e)
 {
     // Common dimensions
     int layerHeaderWidth = 120;
-    int frameWidth = 15;
     int rowHeight = 25;
     int timelineStartY = 40;
-    int timelineFramesStartX = screenWidth - panelWidth + layerHeaderWidth;
+    int resizeHandleWidth = 10;
 
     // Handle mouse wheel scrolling
     if (e.type == SDL_MOUSEWHEEL)
@@ -647,40 +454,25 @@ void Panel::handleEvent(SDL_Event &e)
         int mouseX = e.button.x;
         int mouseY = e.button.y;
 
-        // Check if click is within panel area
-        if (mouseX >= screenWidth - panelWidth && mouseX <= screenWidth)
+        // Check for resize handle click
+        if (mouseX >= screenWidth - panelWidth - resizeHandleWidth &&
+            mouseX <= screenWidth - panelWidth &&
+            mouseY >= 0 && mouseY <= screenHeight)
         {
-            // Check if click is in layer control area
-            if (mouseX < timelineFramesStartX && mouseY > timelineStartY + rowHeight && mouseY < panelHeight - 30)
+            resizing = true;
+            resizeStartX = mouseX;
+        }
+        // Check if click is within panel area
+        else if (mouseX >= screenWidth - panelWidth && mouseX <= screenWidth)
+        {
+            // Check if click is in layer control area. y check changed.
+            if (mouseX < screenWidth - panelWidth + layerHeaderWidth && mouseY > timelineStartY && mouseY < timelineStartY + layers.size() * rowHeight)
             {
-                int clickedRow = (mouseY - timelineStartY - rowHeight + scrollOffsetY) / rowHeight;
+                int clickedRow = (mouseY - timelineStartY + scrollOffsetY) / rowHeight;
                 if (clickedRow >= 0 && clickedRow < static_cast<int>(layers.size()))
                 {
                     activeLayerIndex = clickedRow;
                     cout << "Selected layer: " << layers[clickedRow] << endl;
-                }
-            }
-
-            // Check if click is in timeline frames area
-            else if (mouseX >= timelineFramesStartX && mouseY > timelineStartY + rowHeight && mouseY < panelHeight - 30)
-            {
-                int clickedRow = (mouseY - timelineStartY - rowHeight + scrollOffsetY) / rowHeight;
-                int clickedCol = (mouseX - timelineFramesStartX + scrollOffsetX) / frameWidth;
-
-                if (clickedRow >= 0 && clickedRow < static_cast<int>(layers.size()) && clickedCol >= 0)
-                {
-                    if (e.button.button == SDL_BUTTON_LEFT)
-                    {
-                        // Left click selects frame
-                        selectFrame(clickedRow, clickedCol);
-                        cout << "Selected frame at row " << clickedRow << ", col " << clickedCol << endl;
-                    }
-                    else if (e.button.button == SDL_BUTTON_RIGHT)
-                    {
-                        // Right click toggles keyframe
-                        toggleKeyframe(clickedRow, clickedCol);
-                        cout << "Toggled keyframe at row " << clickedRow << ", col " << clickedCol << endl;
-                    }
                 }
             }
 
@@ -702,6 +494,29 @@ void Panel::handleEvent(SDL_Event &e)
                     cout << "Rewinded to start" << endl;
                 }
             }
+            // Check if add column button is clicked (assuming it's at the bottom right)
+            else if (mouseY >= panelHeight - 30 && mouseX >= screenWidth - panelWidth + layerHeaderWidth - 50)
+            { // made it smaller
+                addColumn();
+            }
+        }
+    }
+    else if (e.type == SDL_MOUSEBUTTONUP)
+    {
+        resizing = false;
+    }
+    else if (e.type == SDL_MOUSEMOTION)
+    {
+        if (resizing)
+        {
+            int mouseX = e.motion.x;
+            int deltaX = mouseX - resizeStartX;
+            panelWidth -= deltaX;
+            if (panelWidth < 50)
+                panelWidth = 50; // Minimum width
+            if (panelWidth > screenWidth)
+                panelWidth = screenWidth; // maximum width.
+            resizeStartX = mouseX;
         }
     }
 
@@ -712,13 +527,6 @@ void Panel::handleEvent(SDL_Event &e)
         {
         case SDLK_SPACE: // Spacebar toggles playback
             togglePlayback();
-            break;
-
-        case SDLK_n: // N key adds new keyframe at current position
-            if (activeLayerIndex >= 0 && activeLayerIndex < static_cast<int>(layers.size()))
-            {
-                toggleKeyframe(activeLayerIndex, currentFrame);
-            }
             break;
 
         case SDLK_l: // L key adds new layer
@@ -733,6 +541,16 @@ void Panel::handleEvent(SDL_Event &e)
             if (currentFrame > 0)
                 currentFrame--;
             break;
+        case SDLK_a:
+            addColumn();
+            break;
         }
     }
+}
+
+void Panel::addColumn()
+{
+    string newColumnName = "Frame " + to_string(columns.size() + 1);
+    columns.push_back(newColumnName);
+    cout << "Added column: " << newColumnName << endl;
 }
