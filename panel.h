@@ -25,6 +25,8 @@ private:
     int screenWidth;
     int screenHeight;
     int panelWidth;
+    int frameIndex;
+    int layerIndex;
     int scrollOffsetY;
     int scrollOffsetX;
     int panelHeight;
@@ -40,11 +42,11 @@ private:
     int resizeStartX;
 
     void renderText(SDL_Renderer *renderer, int xPos, int yPos, const std::string &text, SDL_Color color);
-    void renderLayerControl(SDL_Renderer *renderer, int xPos, int yPos, int col, bool isActive);
+    void renderLayerControl(SDL_Renderer *renderer, int xPos, int yPos, int col, int layerIndex, int frameIndex, bool isActive);
     void renderTimeline(SDL_Renderer *renderer, int xPos, int yPos, int height);
     void renderPlaybackControls(SDL_Renderer *renderer, int xPos, int yPos, int width);
     bool isInsideRect(int mouseX, int mouseY, const SDL_Rect &rect);
-    void addColumn(); //function to add a column
+    void addColumn(); // function to add a column
 };
 
 #endif // PANEL_H
