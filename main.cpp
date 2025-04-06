@@ -142,7 +142,7 @@ void drawRectangle(GLuint shaderProgram, float x, float y, float width, float he
 
 // -------- Main Loop --------
 
-int renderText(SDL_Window *window, SDL_GLContext *context, float w, float h, float x, float y, float r, float g, float b, std::string text)
+int renderText(SDL_Window *window, SDL_GLContext *context, float w, float h, std::string text, float x, float y, SDL_Color color)
 {
    GLuint textShaderProgram = createTextShaderProgram();
 
@@ -161,9 +161,7 @@ int renderText(SDL_Window *window, SDL_GLContext *context, float w, float h, flo
       std::cout << "error loading font" << TTF_GetError() << std::endl;
    }
 
-   SDL_Color color = {0, 0, 0};
-
-   SDL_Surface *textSurface = TTF_RenderText_Blended(font, "trying test", color);
+   SDL_Surface *textSurface = TTF_RenderText_Blended(font, text.c_str(), color);
    if (!textSurface)
    {
       std::cout << "error loading text surface" << TTF_GetError() << std::endl;
@@ -198,7 +196,7 @@ int renderText(SDL_Window *window, SDL_GLContext *context, float w, float h, flo
                 formattedSurface->w, formattedSurface->h, 0,
                 GL_RGBA, GL_UNSIGNED_BYTE, formattedSurface->pixels);
 
-   float textX = 50.0f, textY = 10.0f;
+   float textX = x, textY = y;
    float textW = (float)textSurface->w;
    float textH = (float)textSurface->h;
 
@@ -321,11 +319,14 @@ int main()
       glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "uProjection"), 1, GL_FALSE, ortho);
 
       // Render top bar (stretching full width of screen)
-      float barHeight = 30.0f; // Height of top bar
+      float barHeight = 40.0f; // Height of top bar
       drawRectangle(shaderProgram, w / 2.0f, barHeight / 2.0f, (float)w, barHeight, 0.3f, 0.3f, 0.35f);
 
       glDrawArrays(GL_TRIANGLES, 0, 6);
-      renderText(window, &context, (float)w, (float)h);
+      SDL_Color textColor = {255, 255, 255, 255}; // white text
+      renderText(window, &context, (float)w, (float)h, "File", 20.0f, 2.0f, textColor);
+      renderText(window, &context, (float)w, (float)h, "Edit", 80.0f, 2.0f, textColor);
+
       SDL_GL_SwapWindow(window);
    }
 
